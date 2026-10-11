@@ -1,0 +1,77 @@
+﻿name: DeployPulse CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile Python files
+        run: |
+          python -m py_compile app/taskflow/lambda_function.py
+          python -m py_compile app/incident_classifier/lambda_function.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Package Lambda functions
+        run: |
+          mkdir -p build
+          (cd app/taskflow && zip -q ../../build/taskflow.zip lambda_function.py)
+          (cd app/incident_classifier && zip -q ../../build/incident_classifier.zip lambda_function.py)
+
+      - name: Upload Lambda packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploypulse-lambda-packages
+          path: build/*.zip
+
+  terraform-plan:
+    needs: test-and-package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Lambda packages
+        uses: actions/download-artifact@v4
+        with:
+          name: deploypulse-lambda-packages
+          path: build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::749680934466:role/deploypulse-github-actions-role
+          aws-region: us-east-2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+
+      - name: Terraform initialize
+        run: terraform -chdir=infra init
+
+      - name: Terraform validate
+        run: terraform -chdir=infra validate
+
+      - name: Terraform plan
+        run: terraform -chdir=infra plan -out=tfplan

@@ -1,0 +1,20 @@
+DeployPulse API Verification
+Date: 2026-10-11
+Region: us-east-2
+API: https://exl8evhu36.execute-api.us-east-2.amazonaws.com
+
+Tests:
+1. POST /classify - PASS
+   Input: Production down: service unavailable
+   Expected severity: CRITICAL
+   Matched rules: production down, service unavailable
+
+2. POST /tasks - PASS
+   Created task: Test DeployPulse API
+   Status: OPEN
+
+3. GET /tasks - PASS
+   Previously created task returned successfully.
+
+Architecture verified:
+Client -> API Gateway -> Lambda -> DynamoDB

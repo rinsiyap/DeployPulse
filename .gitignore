@@ -218,3 +218,32 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Terraform local files and state
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Generated Lambda deployment packages
+build/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Test outputs
+classifier-result.json
+classifier-test.json
+taskflow-result.json
+taskflow-test.json

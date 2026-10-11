@@ -1,3 +1,4 @@
+
 resource "aws_dynamodb_table" "tasks" {
   name         = "deploypulse-tasks"
   billing_mode = "PAY_PER_REQUEST"
@@ -18,6 +19,7 @@ resource "aws_dynamodb_table" "tasks" {
   }
 }
 
+# IAM role for TaskFlow Lambda
 resource "aws_iam_role" "taskflow" {
   name = "deploypulse-taskflow-lambda-role"
 
@@ -58,6 +60,7 @@ resource "aws_iam_role_policy" "taskflow" {
   })
 }
 
+# IAM role for incident classifier Lambda
 resource "aws_iam_role" "classifier" {
   name = "deploypulse-classifier-lambda-role"
 
@@ -88,6 +91,7 @@ resource "aws_iam_role_policy" "classifier_logs" {
   })
 }
 
+# CloudWatch log groups with 14-day retention
 resource "aws_cloudwatch_log_group" "taskflow" {
   name              = "/aws/lambda/deploypulse-taskflow"
   retention_in_days = 14
@@ -98,6 +102,7 @@ resource "aws_cloudwatch_log_group" "classifier" {
   retention_in_days = 14
 }
 
+# TaskFlow Lambda
 resource "aws_lambda_function" "taskflow" {
   function_name    = "deploypulse-taskflow"
   role             = aws_iam_role.taskflow.arn
@@ -117,6 +122,7 @@ resource "aws_lambda_function" "taskflow" {
   depends_on = [aws_iam_role_policy.taskflow]
 }
 
+# Incident classifier Lambda
 resource "aws_lambda_function" "classifier" {
   function_name    = "deploypulse-incident-classifier"
   role             = aws_iam_role.classifier.arn
@@ -130,6 +136,7 @@ resource "aws_lambda_function" "classifier" {
   depends_on = [aws_iam_role_policy.classifier_logs]
 }
 
+# HTTP API
 resource "aws_apigatewayv2_api" "deploypulse" {
   name          = "deploypulse-http-api"
   protocol_type = "HTTP"
@@ -139,6 +146,7 @@ resource "aws_apigatewayv2_api" "deploypulse" {
   }
 }
 
+# API integration for TaskFlow
 resource "aws_apigatewayv2_integration" "taskflow" {
   api_id                 = aws_apigatewayv2_api.deploypulse.id
   integration_type       = "AWS_PROXY"
@@ -147,6 +155,7 @@ resource "aws_apigatewayv2_integration" "taskflow" {
   payload_format_version = "2.0"
 }
 
+# API integration for classifier
 resource "aws_apigatewayv2_integration" "classifier" {
   api_id                 = aws_apigatewayv2_api.deploypulse.id
   integration_type       = "AWS_PROXY"
@@ -155,24 +164,96 @@ resource "aws_apigatewayv2_integration" "classifier" {
   payload_format_version = "2.0"
 }
 
+# Cognito User Pool
+resource "aws_cognito_user_pool" "deploypulse" {
+  name = "deploypulse-users"
+
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
+
+  password_policy {
+    minimum_length                   = 12
+    require_lowercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    require_uppercase                = true
+    temporary_password_validity_days = 3
+  }
+
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+  }
+
+  tags = {
+    Project     = "DeployPulse"
+    Environment = "dev"
+  }
+}
+
+# Public application client; no client secret
+resource "aws_cognito_user_pool_client" "deploypulse" {
+  name         = "deploypulse-api-client"
+  user_pool_id = aws_cognito_user_pool.deploypulse.id
+
+  generate_secret               = false
+  explicit_auth_flows           = ["ALLOW_USER_SRP_AUTH", "ALLOW_USER_PASSWORD_AUTH"]
+  prevent_user_existence_errors = "ENABLED"
+  enable_token_revocation       = true
+
+  access_token_validity  = 60
+  id_token_validity      = 60
+  refresh_token_validity = 7
+
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+
+  allowed_oauth_flows_user_pool_client = false
+}
+
+# JWT authorizer for API Gateway
+resource "aws_apigatewayv2_authorizer" "cognito" {
+  api_id           = aws_apigatewayv2_api.deploypulse.id
+  name             = "deploypulse-cognito-authorizer"
+  authorizer_type  = "JWT"
+  identity_sources = ["$request.header.Authorization"]
+
+  jwt_configuration {
+    audience = [aws_cognito_user_pool_client.deploypulse.id]
+    issuer   = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.deploypulse.id}"
+  }
+}
+
+# GET /tasks - Cognito authentication required
 resource "aws_apigatewayv2_route" "tasks_get" {
-  api_id    = aws_apigatewayv2_api.deploypulse.id
-  route_key = "GET /tasks"
-  target    = "integrations/${aws_apigatewayv2_integration.taskflow.id}"
+  api_id             = aws_apigatewayv2_api.deploypulse.id
+  route_key          = "GET /tasks"
+  target             = "integrations/${aws_apigatewayv2_integration.taskflow.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
 }
 
+# POST /tasks - Cognito authentication required
 resource "aws_apigatewayv2_route" "tasks_post" {
-  api_id    = aws_apigatewayv2_api.deploypulse.id
-  route_key = "POST /tasks"
-  target    = "integrations/${aws_apigatewayv2_integration.taskflow.id}"
+  api_id             = aws_apigatewayv2_api.deploypulse.id
+  route_key          = "POST /tasks"
+  target             = "integrations/${aws_apigatewayv2_integration.taskflow.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
 }
 
+# POST /classify - Cognito authentication required
 resource "aws_apigatewayv2_route" "classify_post" {
-  api_id    = aws_apigatewayv2_api.deploypulse.id
-  route_key = "POST /classify"
-  target    = "integrations/${aws_apigatewayv2_integration.classifier.id}"
+  api_id             = aws_apigatewayv2_api.deploypulse.id
+  route_key          = "POST /classify"
+  target             = "integrations/${aws_apigatewayv2_integration.classifier.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito.id
 }
 
+# Default stage
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.deploypulse.id
   name        = "$default"
@@ -189,6 +270,7 @@ resource "aws_apigatewayv2_stage" "default" {
   }
 }
 
+# Permit API Gateway to invoke TaskFlow
 resource "aws_lambda_permission" "api_taskflow" {
   statement_id  = "AllowHttpApiTaskFlow"
   action        = "lambda:InvokeFunction"
@@ -197,6 +279,7 @@ resource "aws_lambda_permission" "api_taskflow" {
   source_arn    = "${aws_apigatewayv2_api.deploypulse.execution_arn}/*/*"
 }
 
+# Permit API Gateway to invoke classifier
 resource "aws_lambda_permission" "api_classifier" {
   statement_id  = "AllowHttpApiClassifier"
   action        = "lambda:InvokeFunction"

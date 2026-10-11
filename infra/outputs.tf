@@ -16,3 +16,12 @@ output "api_endpoint" {
   description = "Base URL of the DeployPulse HTTP API"
   value       = aws_apigatewayv2_api.deploypulse.api_endpoint
 }
+output "cognito_user_pool_id" {
+  description = "DeployPulse Cognito User Pool ID"
+  value       = aws_cognito_user_pool.deploypulse.id
+}
+
+output "cognito_client_id" {
+  description = "DeployPulse Cognito application client ID"
+  value       = aws_cognito_user_pool_client.deploypulse.id
+}

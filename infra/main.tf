@@ -1,4 +1,3 @@
-
 resource "aws_dynamodb_table" "tasks" {
   name         = "deploypulse-tasks"
   billing_mode = "PAY_PER_REQUEST"
@@ -133,7 +132,17 @@ resource "aws_lambda_function" "classifier" {
   timeout          = 10
   memory_size      = 128
 
-  depends_on = [aws_iam_role_policy.classifier_logs]
+  environment {
+    variables = {
+      INCIDENTS_TABLE = aws_dynamodb_table.incidents.name
+      SNS_TOPIC_ARN   = aws_sns_topic.incidents.arn
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy.classifier_logs,
+    aws_iam_role_policy.classifier_incidents
+  ]
 }
 
 # HTTP API

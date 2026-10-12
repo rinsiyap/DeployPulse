@@ -25,3 +25,18 @@ output "cognito_client_id" {
   description = "DeployPulse Cognito application client ID"
   value       = aws_cognito_user_pool_client.deploypulse.id
 }
+output "incidents_table_name" {
+  value = aws_dynamodb_table.incidents.name
+}
+
+output "incident_queue_url" {
+  value = aws_sqs_queue.incident_events.url
+}
+
+output "incident_dlq_url" {
+  value = aws_sqs_queue.incident_dlq.url
+}
+
+output "incident_sns_topic_arn" {
+  value = aws_sns_topic.incidents.arn
+}

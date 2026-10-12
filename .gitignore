@@ -247,3 +247,15 @@ classifier-result.json
 classifier-test.json
 taskflow-result.json
 taskflow-test.json
+
+# Local Terraform configuration
+infra/terraform.tfvars
+
+# Temporary backups
+*.backup
+*.backup-*
+
+# Local AWS policy files
+github-deploy-policy.json
+github-deploy-read-fix.json
+github-oidc-trust-policy.json

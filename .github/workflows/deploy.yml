@@ -1,4 +1,4 @@
-﻿name: DeployPulse CI/CD
+name: DeployPulse CI/CD
 
 on:
   push:
@@ -13,6 +13,9 @@ permissions:
 jobs:
   test-and-package:
     runs-on: ubuntu-latest
+    env:
+      AWS_DEFAULT_REGION: us-east-2
+      AWS_REGION: us-east-2
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

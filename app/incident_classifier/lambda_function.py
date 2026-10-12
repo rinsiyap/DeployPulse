@@ -14,7 +14,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-# Incident severity classification rules
+# Incident severity classification rules.
+# More severe rules are evaluated first.
 RULES = [
     (
         "CRITICAL",
@@ -33,7 +34,6 @@ RULES = [
             "authentication failure",
             "error rate",
             "threshold crossed",
-            "alarm",
             "lambda reported",
         ],
     ),
@@ -54,7 +54,6 @@ INCIDENTS_TABLE = os.environ.get(
     "INCIDENTS_TABLE",
     "deploypulse-incidents",
 )
-
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 
 
@@ -66,7 +65,7 @@ sns = boto3.client("sns")
 
 def classify(description):
     """Classify an incident description using keyword-based rules."""
-    text = description.lower()
+    text = str(description).lower()
 
     for level, keywords in RULES:
         matches = [
@@ -84,15 +83,27 @@ def classify(description):
 def lambda_handler(event, context):
     """Handle HTTP API requests and SQS incident events."""
 
+    # Validate the incoming event.
+    if not isinstance(event, dict):
+        return response(
+            400,
+            {"error": "A JSON object is required."},
+        )
+
     # Process incidents delivered through the SQS event source mapping.
-    if (
-        event.get("Records")
-        and event["Records"][0].get("eventSource") == "aws:sqs"
-    ):
-        return process_sqs_records(event["Records"])
+    records = event.get("Records")
+
+    if isinstance(records, list) and records:
+        if (
+            isinstance(records[0], dict)
+            and records[0].get("eventSource") == "aws:sqs"
+        ):
+            return process_sqs_records(records)
 
     # Preserve the existing HTTP API behavior.
-    body = event.get("body") or event
+    body = event.get("body")
+    if body is None:
+        body = event
 
     if isinstance(body, str):
         try:
@@ -136,7 +147,7 @@ def lambda_handler(event, context):
 
 
 def process_sqs_records(records):
-    """Create incident records and publish notifications for SQS messages."""
+    """Store incidents and publish notifications for SQS messages."""
     failures = []
 
     for record in records:
@@ -145,25 +156,33 @@ def process_sqs_records(records):
         try:
             message = json.loads(record["body"])
 
-            detail = message.get("detail", {})
+            if not isinstance(message, dict):
+                raise ValueError("SQS message body must contain a JSON object.")
+
+            detail = message.get("detail") or {}
+            if not isinstance(detail, dict):
+                raise ValueError("Event detail must be a JSON object.")
+
             alarm = detail.get(
                 "alarmName",
                 "Unknown CloudWatch alarm",
             )
 
-            state = detail.get("state", {})
+            state = detail.get("state") or {}
+            if not isinstance(state, dict):
+                raise ValueError("Alarm state must be a JSON object.")
+
             reason = state.get(
                 "reason",
                 "No alarm reason provided",
             )
 
             description = f"{alarm}: {reason}"
-
             severity, matched_rules = classify(description)
 
             incident = {
                 "incident_id": str(uuid.uuid4()),
-                "alarm_name": alarm,
+                "alarm_name": str(alarm),
                 "description": description[:1000],
                 "severity": severity,
                 "matched_rules": matched_rules,
@@ -178,10 +197,10 @@ def process_sqs_records(records):
                 "Incident stored: incident_id=%s severity=%s alarm=%s",
                 incident["incident_id"],
                 severity,
-                alarm,
+                incident["alarm_name"],
             )
 
-            # Send an email notification through the SNS topic.
+            # Publish the notification through SNS.
             if SNS_TOPIC_ARN:
                 sns.publish(
                     TopicArn=SNS_TOPIC_ARN,
@@ -193,9 +212,13 @@ def process_sqs_records(records):
                     "SNS notification published for incident_id=%s",
                     incident["incident_id"],
                 )
+            else:
+                logger.warning(
+                    "SNS_TOPIC_ARN is empty; no email notification sent."
+                )
 
         except Exception:
-            # Log the traceback and allow SQS to retry this message.
+            # Log the traceback and request retry of this SQS message.
             logger.exception(
                 "Failed to process incident SQS message_id=%s",
                 message_id,
@@ -205,7 +228,7 @@ def process_sqs_records(records):
                 {"itemIdentifier": message_id}
             )
 
-    # Lambda uses this response to retry only failed SQS messages.
+    # Retry only failed SQS messages.
     return {"batchItemFailures": failures}
 
 
@@ -216,5 +239,5 @@ def response(status_code, body):
         "headers": {
             "Content-Type": "application/json",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=str),
     }

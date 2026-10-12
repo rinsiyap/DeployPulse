@@ -259,3 +259,29 @@ infra/terraform.tfvars
 github-deploy-policy.json
 github-deploy-read-fix.json
 github-oidc-trust-policy.json
+
+# Terraform local state and plans
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# AWS credentials and local configuration
+.aws/
+.aws-credentials
+credentials
+credentials.*
+config.local
+
+# Temporary diagnostic files
+*-error-output.json
+*-error-payload.json
+*-test-output.json
+*-test-payload.json
+
+# Local evidence (review and selectively publish)
+# evidence/
+
+# Additional local IAM policy files
+deploypulse-readfix.json
+deploypulse-sns-subscribe-policy.json
